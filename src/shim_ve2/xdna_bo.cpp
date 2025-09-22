@@ -7,6 +7,34 @@
 #include "xdna_bo.h"
 
 namespace shim_xdna_edge {
+
+static std::mutex hdl_mtx;
+static std::unordered_map<uint32_t,int> hdl_ref;
+
+static void hdl_ref_inc(uint32_t hdl)
+{
+  if (!hdl)
+    return;
+  std::lock_guard<std::mutex> lk(hdl_mtx);
+  hdl_ref[hdl]++;
+}
+
+static bool hdl_ref_dec(uint32_t hdl)
+{
+  if (!hdl)
+    return true;
+  std::lock_guard<std::mutex> lk(hdl_mtx);
+  auto it = hdl_ref.find(hdl);
+  if (it == hdl_ref.end())
+    return true;
+
+  if (--it->second == 0) {
+    hdl_ref.erase(it);
+    return true;
+  }
+  return false;
+}
+
 static void
 init_metadata_buffer(xdna_bo& mdata_base_bo,
 		     uint32_t boh,
@@ -118,6 +146,7 @@ xdna_bo(const device_xdna& device, xrt_core::hwctx_handle::slot_id ctx_id,
   , m_map_offset(0)
 {
   alloc_bo();
+  hdl_ref_inc(m_handle);
 
   xcl_bo_flags xflags{ m_flags };
   if (xflags.use == XRT_BO_USE_DEBUG || xflags.use == XRT_BO_USE_DTRACE ||
@@ -134,6 +163,7 @@ xdna_bo(const device_xdna& device, xrt_core::shared_handle::export_handle ehdl)
   , m_import(ehdl)
 {
   uint32_t boh = shim_xdna_edge::xdna_bo::import_drm_bo(m_import, &m_type, &m_aligned_size);
+  hdl_ref_inc(boh);
   shim_xdna_edge::xdna_bo::get_drm_bo_info(boh);
 }
 
@@ -153,16 +183,18 @@ xdna_bo(const device_xdna& device, const amdxdna_drm_get_bo_info& bo_info)
 xdna_bo::
 ~xdna_bo()
 {
-  if (m_handle == 1)
-	return;
-
   xcl_bo_flags xflags{ m_flags };
   if (xflags.use == XRT_BO_USE_DEBUG || xflags.use == XRT_BO_USE_DTRACE ||
       xflags.use == XRT_BO_USE_LOG || xflags.use == XRT_BO_USE_UC_DEBUG)
     detach_from_ctx(xflags.use);
 
-  drm_gem_close close_bo = {m_handle, 0};
-  m_edev->ioctl(DRM_IOCTL_GEM_CLOSE, &close_bo);
+  if (m_handle) {
+    bool last = hdl_ref_dec(m_handle);
+    if (last) {
+      drm_gem_close close_bo{ m_handle, 0 };
+      m_edev->ioctl(DRM_IOCTL_GEM_CLOSE, &close_bo);
+    }
+  }
 }
 
 void
