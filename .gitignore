@@ -3,6 +3,9 @@ build/
 version.h
 .gradle/
 
+# CI build artifacts staged by .github/scripts/ve2_ci_build.sh
+ve2-artifacts/
+
 # cscope database/index files
 cscope.files
 cscope.out

@@ -1,0 +1,46 @@
+name: VE2 Telluride Build
+
+on:
+  pull_request:
+    branches:
+      - ve2_accel
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+    inputs:
+      clean:
+        description: 'Wipe the Yocto tree and re-sync before building'
+        type: boolean
+        default: false
+
+# The Yocto tree is shared by every run on the runner, so a PR may only have one
+# build in flight. Superseded pushes are dropped rather than queued.
+concurrency:
+  group: ve2-build-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ve2-build:
+    name: VE2 RPMs (bitbake xrt)
+    runs-on: [self-hosted, linux, X64, ve2]
+    timeout-minutes: 720
+
+    steps:
+      - name: Check out PR merge commit
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Build VE2 RPMs
+        env:
+          VE2_CLEAN: ${{ inputs.clean || contains(github.event.pull_request.labels.*.name, 've2-clean-build') }}
+        run: .github/scripts/ve2_ci_build.sh
+
+      - name: Upload RPMs and build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ve2-rpms-${{ github.event.pull_request.number || github.run_id }}
+          path: ve2-artifacts
+          retention-days: 14
+          if-no-files-found: warn
