@@ -24,6 +24,8 @@
 
 #include "aie.h"
 #include "amdxdna_coredump.h"
+#include "amdxdna_ctx_status.h"
+#include "amdxdna_tile_read_write.h"
 #include "aie2_msg_priv.h"
 #include "aie2_pci.h"
 #include "aie2_solver.h"
@@ -90,8 +92,12 @@ static int aie2_get_mgmt_chann_info(struct amdxdna_dev_hdl *ndev)
 	 */
 	ret = readx_poll_timeout(readl, SRAM_GET_ADDR(ndev, FW_ALIVE_OFF),
 				 addr, addr, AIE_INTERVAL, AIE_TIMEOUT);
-	if (ret || !addr)
+	if (ret || !addr) {
+		XDNA_ERR(ndev->aie.xdna,
+			 "Firmware from %s did not report alive within %d us",
+			 ndev->priv->fw_path, AIE_TIMEOUT);
 		return -ETIME;
+	}
 
 	off = AIE2_SRAM_OFF(ndev, addr);
 	reg = (u32 *)&info_regs;
@@ -994,9 +1000,11 @@ static int aie2_set_force_preempt(struct amdxdna_client *client,
 				  struct amdxdna_drm_set_state *args)
 {
 	struct amdxdna_dev_hdl *ndev = client->xdna->dev_handle;
-	struct amdxdna_drm_attribute_state state;
+	struct amdxdna_drm_attribute_state state = {};
+	u32 buf_sz;
 
-	if (copy_from_user(&state, u64_to_user_ptr(args->buffer), sizeof(state)))
+	buf_sz = min(args->buffer_size, sizeof(state));
+	if (copy_from_user(&state, u64_to_user_ptr(args->buffer), buf_sz))
 		return -EFAULT;
 
 	if (state.state > 1)
@@ -1014,11 +1022,13 @@ static int aie2_set_frame_boundary_preempt(struct amdxdna_client *client,
 					   struct amdxdna_drm_set_state *args)
 {
 	struct amdxdna_dev_hdl *ndev = client->xdna->dev_handle;
-	struct amdxdna_drm_attribute_state state;
+	struct amdxdna_drm_attribute_state state = {};
+	u32 buf_sz;
 	u32 val;
 	int ret;
 
-	if (copy_from_user(&state, u64_to_user_ptr(args->buffer), sizeof(state)))
+	buf_sz = min(args->buffer_size, sizeof(state));
+	if (copy_from_user(&state, u64_to_user_ptr(args->buffer), buf_sz))
 		return -EFAULT;
 
 	if (state.state > 1)
